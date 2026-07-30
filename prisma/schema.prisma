@@ -1,0 +1,123 @@
+// Bystander data model
+// Retention policy (confirmed):
+// - Raw message text persists for the lifetime of the active ConversationThread,
+//   purged on thread close/archive by a scheduled job.
+// - Derived signals (embeddings, sentiment, tension history) persist independently
+//   of raw text, since long-term trend views (Team Health Dashboard, Relationship
+//   Timeline) need history even after raw content is purged.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ThreadStatus {
+  ACTIVE
+  CLOSED
+  ARCHIVED
+}
+
+enum Platform {
+  DISCORD
+  SLACK
+  TEAMS
+  WHATSAPP
+  TELEGRAM
+  GOOGLE_CHAT
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  members    Member[]
+  threads    ConversationThread[]
+}
+
+model Member {
+  id           String   @id @default(cuid())
+  teamId       String
+  team         Team     @relation(fields: [teamId], references: [id])
+  displayName  String
+  platformUserId String
+  platform     Platform
+  createdAt    DateTime @default(now())
+
+  messages     Message[]
+}
+
+model ConversationThread {
+  id         String       @id @default(cuid())
+  teamId     String
+  team       Team         @relation(fields: [teamId], references: [id])
+  platform   Platform
+  externalId String       // channel/thread id on the source platform
+  status     ThreadStatus @default(ACTIVE)
+  createdAt  DateTime     @default(now())
+  closedAt   DateTime?
+  purgedAt   DateTime?    // set once raw text has been deleted by retention job
+
+  messages       Message[]
+  signals        MessageSignal[]
+  tensionHistory TensionSnapshot[]
+
+  @@index([teamId, status])
+}
+
+// Raw text lives here. Deleted (rawText set to null) by the retention job
+// once status = CLOSED/ARCHIVED and the retention window elapses.
+model Message {
+  id         String   @id @default(cuid())
+  threadId   String
+  thread     ConversationThread @relation(fields: [threadId], references: [id])
+  memberId   String
+  member     Member   @relation(fields: [memberId], references: [id])
+  rawText    String?  // nullable: purged after thread close
+  sentAt     DateTime
+  createdAt  DateTime @default(now())
+
+  signal     MessageSignal?
+
+  @@index([threadId, sentAt])
+}
+
+// Derived, long-lived signals — survive raw text purge.
+model MessageSignal {
+  id            String   @id @default(cuid())
+  messageId     String   @unique
+  message       Message  @relation(fields: [messageId], references: [id])
+  threadId      String
+  thread        ConversationThread @relation(fields: [threadId], references: [id])
+
+  embedding     Float[]  // vector embedding for semantic/context use
+  sentiment     Float    // -1..1
+  emotion       String   // primary detected emotion label
+  replyGapMs    Int?     // time since previous message in thread
+  interruption  Boolean  @default(false)
+
+  createdAt     DateTime @default(now())
+
+  @@index([threadId, createdAt])
+}
+
+// Rolling conflict-prediction snapshots — the backbone of the Team Health
+// Dashboard and Relationship Timeline. Independent of raw message retention.
+model TensionSnapshot {
+  id           String   @id @default(cuid())
+  threadId     String
+  thread       ConversationThread @relation(fields: [threadId], references: [id])
+
+  tensionScore Float    // 0..1
+  trend        Float    // delta vs previous snapshot
+  confidence   Float    // 0..1
+  signalsFired String[] // explainability: e.g. ["3 unanswered questions", "tone shift"]
+
+  createdAt    DateTime @default(now())
+
+  @@index([threadId, createdAt])
+}
