@@ -1,399 +1,174 @@
-"use client";
-// Landing / Marketing page
-// Clean, premium SaaS aesthetic — light theme to match the chat UI
+import Link from "next/link";
+import { ArrowRight, MessageSquare, ShieldAlert, Zap, Lock } from "lucide-react";
 
 export default function Home() {
   return (
-    <div style={{ minHeight: "100vh", background: "#f0f2f7" }}>
+    <div className="min-h-screen bg-slate-50 font-sans">
       {/* ── Nav ── */}
-      <header
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 100,
-          height: 56,
-          display: "flex",
-          alignItems: "center",
-          padding: "0 32px",
-          background: "rgba(255,255,255,0.90)",
-          backdropFilter: "blur(12px)",
-          WebkitBackdropFilter: "blur(12px)",
-          borderBottom: "1px solid #e5e7eb",
-        }}
-      >
+      <header className="sticky top-0 z-50 h-16 flex items-center px-8 bg-white/80 backdrop-blur-md border-b border-slate-200">
         {/* Logo */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1 }}>
-          <div
-            style={{
-              width: 34,
-              height: 34,
-              borderRadius: 9,
-              background: "#4f6ef7",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "white",
-              fontWeight: 700,
-              fontSize: 16,
-              letterSpacing: "-0.02em",
-            }}
-          >
+        <div className="flex items-center gap-3 flex-1">
+          <div className="w-9 h-9 rounded-xl bg-accent flex items-center justify-center text-white font-bold text-lg">
             B
           </div>
-          <span style={{ fontSize: 16, fontWeight: 600, color: "#111827", letterSpacing: "-0.02em" }}>
+          <span className="text-lg font-semibold text-slate-900 tracking-tight">
             Bystander
           </span>
         </div>
 
         {/* Nav Links */}
-        <nav style={{ display: "flex", alignItems: "center", gap: 28 }}>
+        <nav className="hidden md:flex items-center gap-8">
           {["Features", "How it works", "Pricing", "Docs"].map((item) => (
-            <a
+            <Link
               key={item}
               href="#"
-              style={{ fontSize: 14, fontWeight: 500, color: "#6b7280", transition: "color 150ms ease" }}
-              onMouseEnter={(e) => ((e.target as HTMLElement).style.color = "#111827")}
-              onMouseLeave={(e) => ((e.target as HTMLElement).style.color = "#6b7280")}
+              className="text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors"
             >
               {item}
-            </a>
+            </Link>
           ))}
         </nav>
 
         {/* CTA */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, justifyContent: "flex-end" }}>
-          <a
-            href="/dashboard"
-            style={{ fontSize: 14, fontWeight: 500, color: "#6b7280" }}
-            onMouseEnter={(e) => ((e.target as HTMLElement).style.color = "#111827")}
-            onMouseLeave={(e) => ((e.target as HTMLElement).style.color = "#6b7280")}
+        <div className="flex items-center gap-4 flex-1 justify-end">
+          <Link
+            href="/login"
+            className="text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors hidden sm:block"
           >
             Sign in
-          </a>
-          <a
-            href="/dashboard"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "8px 18px",
-              borderRadius: 10,
-              background: "#4f6ef7",
-              color: "white",
-              fontSize: 14,
-              fontWeight: 500,
-              transition: "background 150ms ease",
-            }}
-            onMouseEnter={(e) => ((e.target as HTMLElement).style.background = "#3b5beb")}
-            onMouseLeave={(e) => ((e.target as HTMLElement).style.background = "#4f6ef7")}
+          </Link>
+          <Link
+            href="/onboarding"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover transition-colors shadow-sm"
           >
-            Open Dashboard →
-          </a>
+            Connect Discord <ArrowRight size={16} />
+          </Link>
         </div>
       </header>
 
       {/* ── Hero ── */}
-      <section style={{ padding: "96px 32px 80px", textAlign: "center", maxWidth: 900, margin: "0 auto" }}>
-        {/* Pill badge */}
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "5px 14px",
-            background: "rgba(79,110,247,0.08)",
-            border: "1px solid rgba(79,110,247,0.20)",
-            borderRadius: 9999,
-            color: "#4f6ef7",
-            fontSize: 13,
-            fontWeight: 500,
-            marginBottom: 28,
-          }}
-        >
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#4f6ef7", display: "inline-block" }} />
+      <section className="pt-24 pb-20 px-8 text-center max-w-4xl mx-auto">
+        <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-indigo-50 border border-indigo-100 rounded-full text-indigo-600 text-sm font-medium mb-8">
+          <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
           Now monitoring Discord workspaces
         </div>
 
-        <h1
-          style={{
-            fontSize: "clamp(36px, 5vw, 56px)",
-            fontWeight: 800,
-            letterSpacing: "-0.04em",
-            lineHeight: 1.08,
-            color: "#111827",
-            marginBottom: 24,
-          }}
-        >
+        <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight text-slate-900 leading-tight mb-6">
           Detect team tension{" "}
-          <span
-            style={{
-              background: "linear-gradient(135deg, #4f6ef7, #818cf8)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              backgroundClip: "text",
-            }}
-          >
+          <span className="bg-gradient-to-br from-accent to-indigo-400 bg-clip-text text-transparent">
             before it escalates
           </span>
         </h1>
 
-        <p
-          style={{
-            fontSize: 18,
-            color: "#6b7280",
-            lineHeight: 1.7,
-            maxWidth: 560,
-            margin: "0 auto 40px",
-          }}
-        >
+        <p className="text-lg md:text-xl text-slate-500 leading-relaxed max-w-2xl mx-auto mb-10">
           Bystander monitors team chat, scores rising friction, and privately nudges
           people with de-escalation suggestions — before conflict becomes visible.
         </p>
 
-        <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-          <a
+        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <Link
+            href="/onboarding"
+            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-accent text-white text-base font-semibold shadow-lg shadow-accent/30 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-accent/40 transition-all"
+          >
+            Connect your Discord
+            <ArrowRight size={18} />
+          </Link>
+          <Link
             href="/dashboard"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "12px 24px",
-              borderRadius: 12,
-              background: "#4f6ef7",
-              color: "white",
-              fontSize: 15,
-              fontWeight: 600,
-              boxShadow: "0 4px 16px rgba(79,110,247,0.30)",
-              transition: "all 150ms ease",
-            }}
+            className="inline-flex items-center justify-center px-6 py-3 rounded-xl bg-white text-slate-700 text-base font-medium border border-slate-200 hover:bg-slate-50 hover:border-slate-300 transition-all"
           >
             View Live Dashboard
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-          </a>
-          <a
-            href="#"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "12px 24px",
-              borderRadius: 12,
-              background: "white",
-              color: "#374151",
-              fontSize: 15,
-              fontWeight: 500,
-              border: "1px solid #e5e7eb",
-              transition: "all 150ms ease",
-            }}
-          >
-            Read Documentation
-          </a>
+          </Link>
         </div>
 
-        {/* Trust line */}
-        <p style={{ marginTop: 32, fontSize: 13, color: "#9ca3af" }}>
-          Discord integration · Private nudges only · GDPR-aware retention
+        <p className="mt-8 text-sm text-slate-400 font-medium">
+          Private nudges only · GDPR-aware retention · Explainable predictions
         </p>
       </section>
 
       {/* ── How it works ── */}
-      <section style={{ background: "white", borderTop: "1px solid #e5e7eb", borderBottom: "1px solid #e5e7eb", padding: "80px 32px" }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <div style={{ textAlign: "center", marginBottom: 56 }}>
-            <h2 style={{ fontSize: 32, fontWeight: 700, color: "#111827", letterSpacing: "-0.03em", marginBottom: 12 }}>
+      <section className="bg-white border-y border-slate-200 py-24 px-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl md:text-4xl font-bold text-slate-900 tracking-tight mb-4">
               How Bystander works
             </h2>
-            <p style={{ fontSize: 16, color: "#6b7280", maxWidth: 480, margin: "0 auto" }}>
-              A fully automatic pipeline from message to private nudge — in seconds.
+            <p className="text-lg text-slate-500 max-w-2xl mx-auto">
+              A fully automatic pipeline from message to private nudge — in seconds. Explainable at every step.
             </p>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 24 }}>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
             {[
               {
                 step: "01",
-                icon: (
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                ),
-                color: "#4f6ef7",
-                bg: "rgba(79,110,247,0.08)",
+                icon: <MessageSquare size={24} />,
+                color: "text-blue-600",
+                bg: "bg-blue-50",
                 title: "Discord Ingestion",
-                desc: "Messages arrive via webhook and are normalized into a platform-agnostic format without storing raw text long-term.",
+                desc: "Messages arrive via webhook and are normalized. Raw text is purged when threads close.",
               },
               {
                 step: "02",
-                icon: (
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2v-4M9 21H5a2 2 0 0 1-2-2v-4m0 0h18"/></svg>
-                ),
-                color: "#f59e0b",
-                bg: "rgba(245,158,11,0.08)",
+                icon: <Zap size={24} />,
+                color: "text-amber-500",
+                bg: "bg-amber-50",
                 title: "NLP Analysis",
-                desc: "Anthropic AI scores sentiment, detects emotion, and builds a signal profile — reply gaps, interruptions, tone shifts.",
+                desc: "Anthropic AI scores sentiment, detects emotion, and builds a signal profile instantly.",
               },
               {
                 step: "03",
-                icon: (
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                ),
-                color: "#ef4444",
-                bg: "rgba(239,68,68,0.08)",
+                icon: <ShieldAlert size={24} />,
+                color: "text-red-500",
+                bg: "bg-red-50",
                 title: "Conflict Prediction",
-                desc: "A tension score (0–1) is computed with explainability — every prediction ships signalsFired, never a black-box number.",
+                desc: "Tension score (0–1) is computed. Every prediction ships explicit signalsFired — no black boxes.",
               },
               {
                 step: "04",
-                icon: (
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                ),
-                color: "#22c55e",
-                bg: "rgba(34,197,94,0.08)",
+                icon: <Lock size={24} />,
+                color: "text-green-600",
+                bg: "bg-green-50",
                 title: "Private Nudge",
-                desc: "When tension crosses threshold, a private DM goes to the person with a non-judgmental suggestion or rewrite — never in the public channel.",
+                desc: "When tension crosses a threshold, a private DM offers de-escalation suggestions.",
               },
             ].map((f) => (
               <div
                 key={f.step}
-                style={{
-                  padding: "28px 24px",
-                  borderRadius: 14,
-                  border: "1px solid #e5e7eb",
-                  background: "white",
-                  transition: "box-shadow 200ms ease, border-color 200ms ease",
-                }}
-                onMouseEnter={(e) => {
-                  const el = e.currentTarget as HTMLDivElement;
-                  el.style.boxShadow = "0 8px 24px rgba(0,0,0,0.08)";
-                  el.style.borderColor = "#d1d5db";
-                }}
-                onMouseLeave={(e) => {
-                  const el = e.currentTarget as HTMLDivElement;
-                  el.style.boxShadow = "none";
-                  el.style.borderColor = "#e5e7eb";
-                }}
+                className="p-8 rounded-2xl border border-slate-200 bg-white hover:shadow-xl hover:border-slate-300 transition-all duration-300 group"
               >
                 <div
-                  style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 11,
-                    background: f.bg,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: f.color,
-                    marginBottom: 20,
-                  }}
+                  className={`w-12 h-12 rounded-xl ${f.bg} ${f.color} flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300`}
                 >
                   {f.icon}
                 </div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "#9ca3af", letterSpacing: "0.06em", marginBottom: 8 }}>
+                <div className="text-xs font-bold text-slate-400 tracking-widest mb-2">
                   STEP {f.step}
                 </div>
-                <h3 style={{ fontSize: 16, fontWeight: 600, color: "#111827", marginBottom: 10, letterSpacing: "-0.01em" }}>{f.title}</h3>
-                <p style={{ fontSize: 14, color: "#6b7280", lineHeight: 1.65 }}>{f.desc}</p>
+                <h3 className="text-lg font-semibold text-slate-900 mb-3 tracking-tight">{f.title}</h3>
+                <p className="text-sm text-slate-500 leading-relaxed">{f.desc}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── Retention callout ── */}
-      <section style={{ padding: "80px 32px", maxWidth: 760, margin: "0 auto", textAlign: "center" }}>
-        <div
-          style={{
-            padding: "40px 48px",
-            borderRadius: 18,
-            background: "white",
-            border: "1px solid #e5e7eb",
-            boxShadow: "0 4px 24px rgba(0,0,0,0.05)",
-          }}
-        >
-          <div
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 12,
-              background: "rgba(79,110,247,0.08)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#4f6ef7",
-              margin: "0 auto 20px",
-            }}
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
-          </div>
-          <h3 style={{ fontSize: 22, fontWeight: 700, color: "#111827", letterSpacing: "-0.02em", marginBottom: 12 }}>
-            Privacy by design
-          </h3>
-          <p style={{ fontSize: 15, color: "#6b7280", lineHeight: 1.7, marginBottom: 28 }}>
-            Raw message text is retained only for the duration of the active conversation thread.
-            Once a thread is closed or archived, text is purged automatically.
-            Long-term trend data uses only derived signals — tension scores, sentiment, signals fired.
-          </p>
-          <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
-            {["Automatic purge", "No indefinite storage", "signalsFired explainability"].map((t) => (
-              <span
-                key={t}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: 9999,
-                  background: "#f9fafb",
-                  border: "1px solid #e5e7eb",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: "#374151",
-                }}
-              >
-                {t}
-              </span>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* ── Footer ── */}
-      <footer
-        style={{
-          borderTop: "1px solid #e5e7eb",
-          padding: "32px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          maxWidth: 1200,
-          margin: "0 auto",
-          flexWrap: "wrap",
-          gap: 16,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 7,
-              background: "#4f6ef7",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "white",
-              fontWeight: 700,
-              fontSize: 13,
-            }}
-          >
+      <footer className="py-12 px-8 flex flex-col md:flex-row items-center justify-between max-w-6xl mx-auto border-t border-slate-200 mt-12 gap-6">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center text-white font-bold text-sm">
             B
           </div>
-          <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>Bystander</span>
+          <span className="text-sm font-semibold text-slate-700">Bystander</span>
         </div>
-        <p style={{ fontSize: 13, color: "#9ca3af" }}>
+        <p className="text-sm text-slate-400">
           © 2026 Bystander Inc. AI-powered conflict mediation.
         </p>
-        <div style={{ display: "flex", gap: 20 }}>
+        <div className="flex gap-6">
           {["Privacy", "Terms", "GitHub"].map((l) => (
-            <a key={l} href="#" style={{ fontSize: 13, color: "#9ca3af", transition: "color 150ms ease" }}
-              onMouseEnter={(e) => ((e.target as HTMLElement).style.color = "#374151")}
-              onMouseLeave={(e) => ((e.target as HTMLElement).style.color = "#9ca3af")}
-            >
+            <Link key={l} href="#" className="text-sm text-slate-400 hover:text-slate-900 transition-colors">
               {l}
-            </a>
+            </Link>
           ))}
         </div>
       </footer>

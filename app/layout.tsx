@@ -7,6 +7,8 @@ export const metadata: Metadata = {
     "AI-powered conflict prediction & mediation for team chat platforms. Detect rising tension before it becomes conflict.",
 };
 
+import { AuthProvider } from "./components/AuthProvider";
+
 export default function RootLayout({
   children,
 }: {
@@ -14,7 +16,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }
