@@ -19,6 +19,10 @@ import {
   Message,
 } from "discord.js";
 import { startNotifyServer } from "./server";
+// ⚠️  Worker import — the BullMQ worker MUST run in this persistent process,
+// not as a Vercel serverless function (which terminates after each request).
+// The bot process is always-on, making it the correct host for queue workers.
+import { createIngestionWorker } from "../lib/queue/worker";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -125,6 +129,18 @@ client.once(Events.ClientReady, (readyClient) => {
   // Start the internal DM-delivery HTTP server (POST /notify).
   // Runs in the same process so it can reuse the already-authenticated client.
   startNotifyServer(readyClient);
+  // Start the BullMQ ingestion worker. This is the consumer side of the
+  // async queue: validates → NLP → prediction → mediation → DB write.
+  // concurrency=1 ensures sequential per-thread ordering.
+  const worker = createIngestionWorker();
+  console.log(`[bot] Ingestion worker started (queue: ingestion-discord)`);
+  // Graceful shutdown: close worker before the process exits.
+  process.once("SIGTERM", async () => {
+    console.log("[bot] SIGTERM received — closing worker and Discord client");
+    await worker.close();
+    await client.destroy();
+    process.exit(0);
+  });
 });
 
 client.on(Events.MessageCreate, async (message: Message) => {

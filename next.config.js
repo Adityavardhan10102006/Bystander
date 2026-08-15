@@ -2,7 +2,13 @@
 const nextConfig = {
   reactStrictMode: true,
   experimental: {
-    serverComponentsExternalPackages: ["@prisma/client", "discord.js"],
+    serverComponentsExternalPackages: [
+      "@prisma/client",
+      "discord.js",
+      "bullmq",
+      "pino",
+      "pino-pretty",
+    ],
   },
 };
 
