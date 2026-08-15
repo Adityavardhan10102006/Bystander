@@ -1,0 +1,14 @@
+﻿# Bot-specific gitignore
+
+# Dependencies
+node_modules/
+
+# Compiled output
+dist/
+
+# Environment secrets
+.env
+
+# Editor / OS
+.DS_Store
+Thumbs.db

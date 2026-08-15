@@ -3,6 +3,10 @@
 /.pnp
 .pnp.js
 
+# bot process
+/bot/node_modules
+/bot/dist
+
 # testing
 /coverage
 

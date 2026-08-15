@@ -1,0 +1,26 @@
+{
+  "name": "bystander-bot",
+  "version": "1.0.0",
+  "description": "Bystander Discord bot — message forwarding and DM delivery",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "ts-node index.ts",
+    "dev:server": "ts-node server.ts",
+    "build": "tsc",
+    "build:check": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.15",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}
