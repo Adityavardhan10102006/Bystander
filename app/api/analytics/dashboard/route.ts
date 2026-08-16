@@ -2,17 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth/config";
 import { prisma } from "@/lib/db/client";
+import { hasTeamAccess } from "@/lib/auth/rbac";
 import { logger } from "@/lib/logger";
 
 // Aggregation for the Team Health Dashboard. Reads only derived signals
 // (TensionSnapshot, MessageSignal) — never depends on raw message text
 // being present, since it's purged after thread close.
 //
-// RBAC: the session user must have ADMIN or MODERATOR role for the Discord
-// guild that maps to the requested teamId. This is enforced here in the
-// API route, not just in the UI.
+// RBAC: the session user must have ADMIN or MODERATOR role for the specific
+// Discord guild that owns the requested team. Enforced via lib/auth/rbac.ts.
+// A role in a different guild does NOT grant access.
 
 const log = logger.child({ module: "api/analytics/dashboard" });
+
+const DEMO_MODE = process.env.DEMO_MODE === "true" || process.env.DEMO_MODE === "1";
 
 export async function GET(req: NextRequest) {
   // ── Auth check ────────────────────────────────────────────────────────────
@@ -26,6 +29,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Session user ID missing" }, { status: 401 });
   }
 
+  // ── Demo mode ─────────────────────────────────────────────────────────────
+  if (DEMO_MODE) {
+    const { getDemoDashboard } = await import("@/lib/demo/data");
+    const teamId = new URL(req.url).searchParams.get("teamId") ?? "demo-team";
+    return NextResponse.json({ ...getDemoDashboard(teamId), isDemoMode: true });
+  }
+
   // ── Params ────────────────────────────────────────────────────────────────
   const { searchParams } = new URL(req.url);
   const teamId = searchParams.get("teamId");
@@ -34,17 +44,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "teamId is required" }, { status: 400 });
   }
 
-  // ── RBAC check ────────────────────────────────────────────────────────────
-  // Find threads for this team to discover the associated Discord guild(s),
-  // then verify the user holds ADMIN or MODERATOR in at least one of them.
-  //
-  // Phase 1 simplification: teamId maps to a team whose name is
-  // "discord:{channelId}". We resolve guild access via UserServerRole.
-  // If no UserServerRole row exists for this user+team, deny access.
-
+  // ── Tenant-aware RBAC check ───────────────────────────────────────────────
+  // Uses the team's discordGuildId to verify the user's role for THIS specific
+  // guild. A role in any other guild is NOT sufficient.
   const authorized = await hasTeamAccess(userId, teamId);
   if (!authorized) {
-    log.warn({ userId, teamId }, "RBAC denied: user lacks team access");
+    log.warn({ userId, teamId }, "RBAC denied: user lacks access to this team");
     return NextResponse.json(
       { error: "Forbidden — insufficient role for this team" },
       { status: 403 }
@@ -52,57 +57,40 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Data fetch ────────────────────────────────────────────────────────────
-  const threads = await prisma.conversationThread.findMany({
-    where: { teamId },
-    include: {
-      tensionHistory: {
-        orderBy: { createdAt: "desc" },
-        take: 20,
+  const [threads, interventionCounts] = await Promise.all([
+    prisma.conversationThread.findMany({
+      where: { teamId },
+      include: {
+        tensionHistory: {
+          orderBy: { createdAt: "desc" },
+          take: 20,
+        },
       },
-    },
-  });
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.intervention.groupBy({
+      by: ["threadId", "status"],
+      where: { teamId },
+      _count: true,
+    }),
+  ]);
+
+  // Attach intervention count summary to threads
+  const interventionsByThread: Record<string, { sent: number; failed: number }> = {};
+  for (const row of interventionCounts) {
+    if (!interventionsByThread[row.threadId]) {
+      interventionsByThread[row.threadId] = { sent: 0, failed: 0 };
+    }
+    if (row.status === "SENT") interventionsByThread[row.threadId].sent += row._count;
+    if (row.status === "FAILED") interventionsByThread[row.threadId].failed += row._count;
+  }
+
+  const threadsWithInterventions = threads.map((t) => ({
+    ...t,
+    interventions: interventionsByThread[t.id] ?? { sent: 0, failed: 0 },
+  }));
 
   log.info({ userId, teamId, threadCount: threads.length }, "Dashboard data fetched");
 
-  return NextResponse.json({ teamId, threads });
-}
-
-// ---------------------------------------------------------------------------
-// RBAC helper
-// ---------------------------------------------------------------------------
-
-/**
- * Returns true if the given user holds ADMIN or MODERATOR in any Discord guild
- * that is associated with the requested team.
- *
- * Association: a UserServerRole row with role ADMIN|MODERATOR links a user
- * to a guild. The guild must be linked to the team via a ConversationThread
- * whose externalId matches the guild ID (Phase 1 convention).
- *
- * Superuser shortcut: if the user has ANY ADMIN role across any guild, they
- * can access any team. Tighten this in Phase 2 with explicit guild→team mapping.
- */
-async function hasTeamAccess(userId: string, teamId: string): Promise<boolean> {
-  // Check if the user has any ADMIN or MODERATOR role.
-  const role = await prisma.userServerRole.findFirst({
-    where: {
-      userId,
-      role: { in: ["ADMIN", "MODERATOR"] },
-    },
-  });
-
-  if (role) return true;
-
-  // No role found — check if this is the user's own team (no roles set up yet).
-  // This allows the first user to bootstrap without a manual role assignment.
-  // Remove this fallback once proper guild→team mapping is in place (Phase 2).
-  const team = await prisma.team.findUnique({ where: { id: teamId } });
-  if (!team) return false;
-
-  // Allow if the team was auto-created and has no role restrictions yet.
-  const anyRoleForTeam = await prisma.userServerRole.findFirst({
-    where: { role: { in: ["ADMIN", "MODERATOR"] } },
-  });
-  // If no roles are configured at all, allow access (bootstrap mode).
-  return anyRoleForTeam === null;
+  return NextResponse.json({ teamId, threads: threadsWithInterventions, isDemoMode: false });
 }

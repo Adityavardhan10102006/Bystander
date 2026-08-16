@@ -38,6 +38,19 @@ const EnvSchema = z.object({
   DISCORD_PUBLIC_KEY: z.string().optional(),
   DISCORD_CLIENT_ID: z.string().optional(),
 
+  // ── Ingestion security ────────────────────────────────────────────────────
+  // REQUIRED: The Discord bot must send this as Authorization: Bearer <secret>.
+  // Security MUST fail CLOSED — never skip authentication if this is missing.
+  INGESTION_SECRET: z
+    .string({ required_error: "INGESTION_SECRET is required — generate with: openssl rand -base64 32" })
+    .min(16, "INGESTION_SECRET must be at least 16 characters"),
+
+  // ── Notification server ───────────────────────────────────────────────────
+  // REQUIRED: Protects the internal DM-delivery server.
+  NOTIFY_SECRET: z
+    .string({ required_error: "NOTIFY_SECRET is required — generate with: openssl rand -base64 32" })
+    .min(16, "NOTIFY_SECRET must be at least 16 characters"),
+
   // ── NextAuth ──────────────────────────────────────────────────────────────
   NEXTAUTH_SECRET: z
     .string({ required_error: "NEXTAUTH_SECRET is required" })
@@ -63,7 +76,11 @@ const EnvSchema = z.object({
     .min(1, "GOOGLE_CLIENT_SECRET must not be empty"),
 
   // ── Cron ──────────────────────────────────────────────────────────────────
-  CRON_SECRET: z.string().optional(),
+  // REQUIRED: Security must FAIL CLOSED. Without this, the purge endpoint is
+  // open to anyone. Generate with: openssl rand -base64 32
+  CRON_SECRET: z
+    .string({ required_error: "CRON_SECRET is required — generate with: openssl rand -base64 32" })
+    .min(16, "CRON_SECRET must be at least 16 characters"),
 
   // ── Retention ─────────────────────────────────────────────────────────────
   RETENTION_PURGE_INTERVAL_HOURS: z
@@ -71,6 +88,14 @@ const EnvSchema = z.object({
     .transform(Number)
     .refine((n) => n > 0, "RETENTION_PURGE_INTERVAL_HOURS must be a positive number")
     .default("24"),
+
+  // ── Demo mode ─────────────────────────────────────────────────────────────
+  // When true, the dashboard returns a deterministic demo dataset instead of
+  // real DB queries. Clearly marked in API responses. NEVER use in production.
+  DEMO_MODE: z
+    .string()
+    .transform((v) => v === "true" || v === "1")
+    .default("false"),
 
   // ── Misc ──────────────────────────────────────────────────────────────────
   NODE_ENV: z
@@ -85,7 +110,6 @@ const EnvSchema = z.object({
 
   // ── Bot notify server ─────────────────────────────────────────────────────
   NOTIFY_PORT: z.string().transform(Number).default("3001"),
-  NOTIFY_SECRET: z.string().optional(),
   BYSTANDER_API_URL: z.string().url().optional(),
 });
 

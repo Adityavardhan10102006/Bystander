@@ -5,7 +5,8 @@
  *  1. Log in to the Discord Gateway using DISCORD_BOT_TOKEN.
  *  2. Listen for messageCreate events and forward each message to the
  *     Bystander API's /api/ingestion/discord endpoint.
- *  3. Retry transient network errors without crashing the process.
+ *  3. Authenticate each request with INGESTION_SECRET.
+ *  4. Retry transient network errors without crashing the process.
  *
  * This process intentionally does NO NLP, scoring, or mediation logic.
  * It is a thin forwarding layer only.
@@ -25,22 +26,28 @@ import { startNotifyServer } from "./server";
 import { createIngestionWorker } from "../lib/queue/worker";
 
 // ---------------------------------------------------------------------------
-// Configuration
+// Configuration — fail closed on missing secrets
 // ---------------------------------------------------------------------------
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const BYSTANDER_API_URL = process.env.BYSTANDER_API_URL;
+const INGESTION_SECRET = process.env.INGESTION_SECRET;
 
 if (!DISCORD_BOT_TOKEN) {
-  console.error(
-    "[bot] DISCORD_BOT_TOKEN is not set. Exiting."
-  );
+  console.error("[bot] DISCORD_BOT_TOKEN is not set. Exiting.");
   process.exit(1);
 }
 
 if (!BYSTANDER_API_URL) {
+  console.error("[bot] BYSTANDER_API_URL is not set. Exiting.");
+  process.exit(1);
+}
+
+if (!INGESTION_SECRET) {
   console.error(
-    "[bot] BYSTANDER_API_URL is not set. Exiting."
+    "[bot] INGESTION_SECRET is not set. Exiting.\n" +
+    "      Generate one with: openssl rand -base64 32\n" +
+    "      Set it in .env for both the bot and the Next.js app."
   );
   process.exit(1);
 }
@@ -57,6 +64,7 @@ const RETRY_BASE_DELAY_MS = 500;
 
 /**
  * POST JSON to a URL with simple exponential back-off on transient failures.
+ * Attaches the INGESTION_SECRET bearer token to every request.
  * Never throws — logs and returns false on permanent failure so the bot
  * keeps running.
  */
@@ -68,7 +76,11 @@ async function postWithRetry(
     try {
       const res = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // SECURITY: always send the shared secret for mutual authentication.
+          "Authorization": `Bearer ${INGESTION_SECRET}`,
+        },
         body: JSON.stringify(payload),
       });
 
@@ -78,9 +90,9 @@ async function postWithRetry(
 
       // 4xx errors are not transient — log and give up immediately.
       if (res.status >= 400 && res.status < 500) {
-        const text = await res.text().catch(() => "(unreadable body)");
+        // Never log response body (may contain sensitive details)
         console.error(
-          `[bot] Ingestion endpoint returned ${res.status} (non-retryable): ${text}`
+          `[bot] Ingestion endpoint returned ${res.status} (non-retryable).`
         );
         return false;
       }
@@ -152,6 +164,10 @@ client.on(Events.MessageCreate, async (message: Message) => {
   // NormalizedMessage — we just supply the raw Discord fields.
   const payload = {
     channel_id: message.channelId,
+    // Include guild_id for proper team/guild mapping (null for DMs)
+    guild_id: message.guildId ?? undefined,
+    // Include message ID for deduplication
+    message_id: message.id,
     author: {
       id: message.author.id,
       username: message.author.username,
@@ -167,7 +183,7 @@ client.on(Events.MessageCreate, async (message: Message) => {
     return;
   }
 
-  // Verbose-level log; remove or gate behind LOG_LEVEL env var in production.
+  // Verbose-level log; never log message content.
   console.log(
     `[bot] Forwarded message from ${message.author.username} in channel ${message.channelId}`
   );

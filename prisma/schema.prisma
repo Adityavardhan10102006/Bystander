@@ -41,6 +41,18 @@ enum ServerRole {
 }
 
 // ---------------------------------------------------------------------------
+// Intervention delivery status
+// ---------------------------------------------------------------------------
+
+enum InterventionStatus {
+  PENDING
+  SENT
+  FAILED
+  DISMISSED
+  ACCEPTED
+}
+
+// ---------------------------------------------------------------------------
 // NextAuth.js adapter models
 // ---------------------------------------------------------------------------
 
@@ -115,24 +127,35 @@ model UserServerRole {
 // ---------------------------------------------------------------------------
 
 model Team {
-  id        String   @id @default(cuid())
-  name      String
-  createdAt DateTime @default(now())
+  id             String   @id @default(cuid())
+  name           String
+  /// The Discord guild (server) snowflake that this team monitors.
+  /// Separate from channel/thread IDs. Used for RBAC joining.
+  discordGuildId String?
+  platform       Platform @default(DISCORD)
+  createdAt      DateTime @default(now())
 
-  members    Member[]
-  threads    ConversationThread[]
+  members       Member[]
+  threads       ConversationThread[]
+  interventions Intervention[]
+
+  @@index([discordGuildId])
 }
 
 model Member {
-  id           String   @id @default(cuid())
-  teamId       String
-  team         Team     @relation(fields: [teamId], references: [id])
-  displayName  String
+  id             String   @id @default(cuid())
+  teamId         String
+  team           Team     @relation(fields: [teamId], references: [id])
+  displayName    String
   platformUserId String
-  platform     Platform
-  createdAt    DateTime @default(now())
+  platform       Platform
+  createdAt      DateTime @default(now())
 
-  messages     Message[]
+  messages      Message[]
+  interventions Intervention[]
+
+  /// Prevent duplicate members per team per platform user
+  @@unique([teamId, platformUserId])
 }
 
 model ConversationThread {
@@ -140,7 +163,10 @@ model ConversationThread {
   teamId     String
   team       Team         @relation(fields: [teamId], references: [id])
   platform   Platform
-  externalId String       // channel/thread id on the source platform
+  /// channel/thread id on the source platform (NOT the guild id)
+  externalId String
+  /// Discord guild snowflake — stored for routing/context
+  guildId    String?
   status     ThreadStatus @default(ACTIVE)
   createdAt  DateTime     @default(now())
   closedAt   DateTime?
@@ -151,7 +177,10 @@ model ConversationThread {
   messages       Message[]
   signals        MessageSignal[]
   tensionHistory TensionSnapshot[]
+  interventions  Intervention[]
 
+  /// Prevent duplicate threads per team per platform channel
+  @@unique([teamId, externalId, platform])
   @@index([teamId, status])
 }
 
@@ -163,6 +192,8 @@ model Message {
   thread     ConversationThread @relation(fields: [threadId], references: [id])
   memberId   String
   member     Member   @relation(fields: [memberId], references: [id])
+  /// External platform message ID — used for deduplication.
+  externalId String?  @unique
   rawText    String?  // nullable: purged after thread close
   sentAt     DateTime
   createdAt  DateTime @default(now())
@@ -180,11 +211,16 @@ model MessageSignal {
   threadId      String
   thread        ConversationThread @relation(fields: [threadId], references: [id])
 
-  embedding     Float[]  // vector embedding for semantic/context use
-  sentiment     Float    // -1..1
-  emotion       String   // primary detected emotion label
-  replyGapMs    Int?     // time since previous message in thread
+  /// Sentiment score: -1 (very negative) to 1 (very positive). From AI.
+  sentiment     Float
+  /// Primary detected emotion label from AI (e.g. "anger", "frustration"). Null until computed.
+  emotion       String?
+  /// Reply gap in milliseconds from previous message in thread. Null for first message.
+  replyGapMs    Int?
+  /// True if message was sent while a previous message was still unacknowledged.
   interruption  Boolean  @default(false)
+  /// Measured signals that fired for this message (structured, not LLM-invented).
+  signalCodes   String[]
 
   createdAt     DateTime @default(now())
 
@@ -198,12 +234,44 @@ model TensionSnapshot {
   threadId     String
   thread       ConversationThread @relation(fields: [threadId], references: [id])
 
-  tensionScore Float    // 0..1
-  trend        Float    // delta vs previous snapshot
+  tensionScore Float    // 0..1 — computed by deterministic risk engine (not LLM)
+  riskLevel    String   // LOW | MEDIUM | HIGH | CRITICAL
+  trend        Float    // delta vs previous snapshot (positive = rising, negative = falling)
   confidence   Float    // 0..1
-  signalsFired String[] // explainability: e.g. ["3 unanswered questions", "tone shift"]
+  /// Explainability: structured signal codes that fired (e.g. ["NEGATIVE_SENTIMENT", "RAPID_REPLY_BURST"])
+  signalsFired String[]
+  /// Human-readable explanations matching signalsFired (for display)
+  signalLabels String[]
+  /// AI-generated mediation suggestion. Null when circuit breaker is open.
+  mediationSuggestion String?
 
   createdAt    DateTime @default(now())
 
+  @@index([threadId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Intervention: tracks nudge delivery lifecycle
+// ---------------------------------------------------------------------------
+
+model Intervention {
+  id             String             @id @default(cuid())
+  teamId         String
+  team           Team               @relation(fields: [teamId], references: [id])
+  threadId       String
+  thread         ConversationThread @relation(fields: [threadId], references: [id])
+  memberId       String?
+  member         Member?            @relation(fields: [memberId], references: [id])
+  platformUserId String
+  platform       Platform
+  /// The message actually sent to the user
+  message        String
+  status         InterventionStatus @default(PENDING)
+  /// Populated on FAILED status
+  errorMessage   String?
+  createdAt      DateTime           @default(now())
+  sentAt         DateTime?
+
+  @@index([teamId, createdAt])
   @@index([threadId, createdAt])
 }

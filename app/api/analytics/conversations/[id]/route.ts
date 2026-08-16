@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth/config";
 import { prisma } from "@/lib/db/client";
+import { hasTeamAccess } from "@/lib/auth/rbac";
 import { logger } from "@/lib/logger";
 
 // Read-only endpoint to fetch a single conversation's details for the UI.
 //
-// RBAC: the session user must have ADMIN or MODERATOR role in at least
-// one guild that grants access to teams. Verified against UserServerRole.
+// RBAC: the session user must have ADMIN or MODERATOR role for the specific
+// guild that owns this thread's team. Verified via lib/auth/rbac.ts.
+//
+// Privacy: rawText is only included in the response for ADMIN/MODERATOR users
+// of the correct team. MEMBER role cannot see raw message content.
 
 const log = logger.child({ module: "api/analytics/conversations/[id]" });
 
@@ -32,7 +36,7 @@ export async function GET(
     return NextResponse.json({ error: "Conversation ID is required" }, { status: 400 });
   }
 
-  // Fetch the thread so we know which team (and therefore guild) it belongs to.
+  // Fetch the thread metadata first to get teamId for RBAC check.
   const thread = await prisma.conversationThread.findUnique({
     where: { id },
     include: {
@@ -40,7 +44,16 @@ export async function GET(
         include: { members: true },
       },
       messages: {
-        include: { signal: true, member: true },
+        include: {
+          // Include signal but NOT rawText — we'll strip it if not authorized
+          signal: true,
+          member: {
+            select: {
+              displayName: true,
+              platformUserId: true,
+            },
+          },
+        },
         orderBy: { sentAt: "asc" },
       },
       signals: true,
@@ -54,7 +67,7 @@ export async function GET(
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
   }
 
-  // ── RBAC check ────────────────────────────────────────────────────────────
+  // ── Tenant-aware RBAC check ───────────────────────────────────────────────
   const authorized = await hasTeamAccess(userId, thread.teamId);
   if (!authorized) {
     log.warn({ userId, threadId: id, teamId: thread.teamId }, "RBAC denied");
@@ -64,31 +77,26 @@ export async function GET(
     );
   }
 
-  log.info({ userId, threadId: id }, "Conversation detail fetched");
-
-  return NextResponse.json(thread);
-}
-
-// ---------------------------------------------------------------------------
-// RBAC helper (same logic as dashboard route)
-// ---------------------------------------------------------------------------
-
-async function hasTeamAccess(userId: string, teamId: string): Promise<boolean> {
-  const role = await prisma.userServerRole.findFirst({
-    where: {
-      userId,
-      role: { in: ["ADMIN", "MODERATOR"] },
+  // ── Fetch interventions for this thread ───────────────────────────────────
+  const interventions = await prisma.intervention.findMany({
+    where: { threadId: id },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      platformUserId: true,
+      message: true,
+      status: true,
+      errorMessage: true,
+      createdAt: true,
+      sentAt: true,
     },
   });
 
-  if (role) return true;
+  // ── Privacy: rawText is available to ADMIN/MODERATOR of the correct team ──
+  // hasTeamAccess already confirmed ADMIN or MODERATOR, so rawText is safe here.
+  // If we add MEMBER role viewing in the future, strip rawText for them.
 
-  // Bootstrap fallback: allow if no roles are configured yet.
-  const anyRole = await prisma.userServerRole.findFirst({
-    where: { role: { in: ["ADMIN", "MODERATOR"] } },
-  });
-  
-  // Confirm the team exists before granting bootstrap access.
-  const team = await prisma.team.findUnique({ where: { id: teamId } });
-  return anyRole === null && team !== null;
+  log.info({ userId, threadId: id }, "Conversation detail fetched");
+
+  return NextResponse.json({ ...thread, interventions });
 }

@@ -11,59 +11,60 @@ export type Platform =
   | "GOOGLE_CHAT";
 
 export interface NormalizedMessage {
+  /** Discord channel ID or Slack channel ID — the immediate conversation context */
   externalThreadId: string;
+  /** Discord guild (server) ID — the broader organizational context. Required for RBAC. */
+  guildId?: string;
   platform: Platform;
+  /** Platform-specific user ID (e.g. Discord snowflake) */
   platformUserId: string;
+  /** Display name (e.g. Discord username). No email or personal data. */
   displayName: string;
   text: string;
   sentAt: string; // ISO timestamp
+  /** Platform-native message ID for deduplication */
+  externalMessageId?: string;
 }
 
 export interface NlpAnalysis {
-  embedding: number[];
-  sentiment: number; // -1..1
-  emotion: string;
-  language: string;
-}
-
-export interface ConflictPrediction {
-  tensionScore: number; // 0..1
-  trend: number; // delta vs previous snapshot
-  confidence: number; // 0..1
-  signalsFired: string[]; // e.g. ["3 unanswered questions", "tone shift detected"]
+  sentiment: number; // -1..1 — from AI
+  emotion: string | null; // primary emotion label — from AI, null if fallback
+  language: string; // ISO 639-1 code
+  explanation: string; // one-sentence explanation from AI
 }
 
 export type EscalationLevel = 1 | 2 | 3 | 4;
+export type EscalationLevelLabel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
-export interface NudgeSuggestion {
-  level: EscalationLevel;
-  message: string; // private suggestion text (rewrite, apology draft, check-in prompt)
-  rationale: string;
+/** Full result of the analysis pipeline for one message. */
+export interface AiAnalysisResult {
+  /** Message sentiment: -1..1. From AI. */
+  sentiment: number;
+  /** Emotion label. From AI. Null when circuit breaker is open. */
+  emotion: string | null;
+  /** One-sentence explanation of message tone. From AI. */
+  explanation: string;
+  /** Mediation suggestion text. From AI. Null when tension is low or circuit breaker open. */
+  mediationSuggestion: string | null;
+  /** Whether this is a circuit-breaker fallback result. */
+  isFallback: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Phase 1 additions — structured AI response type
-// ---------------------------------------------------------------------------
-// These extend the contract without altering the existing interfaces above.
-// The tensionScore here is 0–100 (human-readable scale) rather than the
-// internal 0–1 used by ConflictPrediction. Mapping: tensionScore * 100.
-
-export type EscalationLevelLabel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-
-/** Aggregated result returned by the full NLP → prediction → mediation pipeline. */
-export interface AiAnalysisResult {
-  /** Overall tension level, 0–100 scale (maps from ConflictPrediction.tensionScore × 100). */
+/** Result of the deterministic risk engine for one message. */
+export interface RiskResult {
+  /** Tension score 0–1. Computed deterministically, NOT from LLM. */
   tensionScore: number;
-  /** Human-readable escalation tier derived from tensionScore. */
-  escalationLevel: EscalationLevelLabel;
-  /** Message-level sentiment, -1 (very negative) to 1 (very positive). */
-  sentiment: number;
-  /** Private mediation suggestion text to deliver to the next sender. */
-  mediationSuggestion: string;
-  /** Short human-readable signals that drove this assessment (for explainability). */
-  signalsFired: string[];
-  /** Model confidence, 0–1. */
+  /** Risk level derived from tensionScore. */
+  riskLevel: RiskLevel;
+  /** Delta vs previous snapshot. */
+  trend: number;
+  /** Human-readable trend direction. */
+  trendDirection: "rising" | "falling" | "stable";
+  /** Signal codes that fired (for DB storage). */
+  signalCodes: string[];
+  /** Human-readable signal labels (for display). */
+  signalLabels: string[];
+  /** Confidence score 0–1. */
   confidence: number;
-  /** True when the circuit breaker short-circuited and the result is a fallback. */
-  isFallback?: boolean;
 }

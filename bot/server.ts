@@ -10,13 +10,10 @@
  *   Response 200: { "ok": true }
  *   Response 4xx/5xx: { "ok": false, "error": "<reason>" }
  *
- * This file is intentionally separate from index.ts so it can be tested
- * independently (mock the Client) or omitted entirely.
- *
- * Typical usage — call startNotifyServer(client) inside ClientReady in index.ts:
- *
- *   import { startNotifyServer } from "./server";
- *   client.once(Events.ClientReady, () => startNotifyServer(client));
+ * Security: REQUIRES Authorization: Bearer <NOTIFY_SECRET>.
+ * This endpoint is internal only — never expose it publicly.
+ * Security FAILS CLOSED: if NOTIFY_SECRET is not set, ALL requests are
+ * rejected (the server must be properly configured before use).
  */
 
 import "dotenv/config";
@@ -44,8 +41,22 @@ function isNotifyBody(v: unknown): v is NotifyBody {
 // ---------------------------------------------------------------------------
 
 const NOTIFY_PORT = Number(process.env.NOTIFY_PORT ?? 3001);
-/** Optional bearer token — set NOTIFY_SECRET in .env to require authorization. */
+
+/**
+ * SECURITY: NOTIFY_SECRET is REQUIRED.
+ * If not set, the server starts but rejects ALL requests with 503.
+ * This ensures security fails CLOSED — never silently allows unauthenticated
+ * DM delivery.
+ */
 const NOTIFY_SECRET = process.env.NOTIFY_SECRET;
+
+if (!NOTIFY_SECRET) {
+  console.error(
+    "[server] NOTIFY_SECRET is not set. The notify server will reject all requests.\n" +
+    "         Generate one with: openssl rand -base64 32\n" +
+    "         Set NOTIFY_SECRET in .env for both the bot and the Next.js app."
+  );
+}
 
 /**
  * Starts the internal HTTP server and binds it to NOTIFY_PORT.
@@ -60,14 +71,18 @@ export function startNotifyServer(client: Client): http.Server {
       return;
     }
 
-    // Optional bearer-token check
-    if (NOTIFY_SECRET) {
-      const auth = req.headers["authorization"] ?? "";
-      if (auth !== `Bearer ${NOTIFY_SECRET}`) {
-        res.writeHead(401, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Unauthorized" }));
-        return;
-      }
+    // SECURITY: Require NOTIFY_SECRET — fail CLOSED.
+    if (!NOTIFY_SECRET) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Service misconfigured — NOTIFY_SECRET is not set" }));
+      return;
+    }
+
+    const auth = req.headers["authorization"] ?? "";
+    if (auth !== `Bearer ${NOTIFY_SECRET}`) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Unauthorized" }));
+      return;
     }
 
     // Read + size-limit the request body
@@ -121,6 +136,9 @@ export function startNotifyServer(client: Client): http.Server {
 
   server.listen(NOTIFY_PORT, () => {
     console.log(`[server] Notify HTTP server listening on port ${NOTIFY_PORT}`);
+    if (!NOTIFY_SECRET) {
+      console.warn("[server] ⚠️  NOTIFY_SECRET not set — all requests will be rejected");
+    }
   });
 
   server.on("error", (err) => {

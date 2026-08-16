@@ -11,8 +11,6 @@ interface User {
   id: string;
   name: string;
   email: string;
-  /** teamId is derived from the session — may not be present for new users. */
-  teamId?: string;
 }
 
 interface AuthContextType {
@@ -34,17 +32,16 @@ function AuthStateProvider({ children }: { children: React.ReactNode }) {
 
   const isLoading = status === "loading";
 
-  const user: User | null =
-    session?.user
-      ? {
-          id: (session.user as typeof session.user & { id?: string }).id ?? "",
-          name: session.user.name ?? "",
-          email: session.user.email ?? "",
-          // teamId is not stored on the JWT by default — components that need
-          // it should fetch from /api/analytics/dashboard which applies RBAC.
-          teamId: undefined,
-        }
-      : null;
+  const user: User | null = session?.user
+    ? {
+        id: (session.user as typeof session.user & { id?: string }).id ?? "",
+        name: session.user.name ?? "",
+        email: session.user.email ?? "",
+        // teamId is intentionally NOT on the user object.
+        // Team access is discovered via GET /api/teams which applies RBAC.
+        // Never trust a client-supplied teamId — always verify server-side.
+      }
+    : null;
 
   return (
     <AuthContext.Provider value={{ user, isLoading }}>

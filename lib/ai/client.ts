@@ -1,16 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type {
-  NlpAnalysis,
-  ConflictPrediction,
-  NudgeSuggestion,
-  AiAnalysisResult,
-  EscalationLevelLabel,
-} from "@/types/pipeline";
+import { z } from "zod";
+import type { EscalationLevelLabel } from "@/types/pipeline";
 import { logger } from "@/lib/logger";
 
-// Single hosted provider for both NLP analysis and mediation generation.
-// This is the Option A decision: no self-hosted RoBERTa/DeBERTa/spaCy,
-// no Python process — one hosted model call per analysis stage.
+// Single hosted provider for NLP analysis and mediation generation.
+// One structured AI call per message — not three separate calls.
+//
+// The LLM provides: sentiment, emotion, explanation, mediation suggestion.
+// The risk engine (lib/risk/) computes: tensionScore, riskLevel, signals, trend.
+// The LLM NEVER controls the final numerical conflict score.
 
 // ---------------------------------------------------------------------------
 // Client
@@ -25,13 +23,31 @@ const MODEL = process.env.AI_MODEL || "claude-sonnet-4-6";
 const log = logger.child({ module: "ai-client" });
 
 // ---------------------------------------------------------------------------
-// JSON extraction helper
+// Validated AI response schema (Zod)
+// The LLM must return this exact structure. We validate strictly.
 // ---------------------------------------------------------------------------
 
-function extractJson<T>(text: string): T {
-  const cleaned = text.replace(/```json|```/g, "").trim();
-  return JSON.parse(cleaned) as T;
-}
+const AiResponseSchema = z.object({
+  sentiment: z
+    .number()
+    .min(-1)
+    .max(1)
+    .describe("Sentiment score: -1 (very negative) to 1 (very positive)"),
+  emotion: z
+    .string()
+    .min(1)
+    .describe("Primary emotion label (e.g. 'anger', 'frustration', 'neutral', 'joy')"),
+
+  explanation: z
+    .string()
+    .describe("One sentence explaining the emotional state of this message"),
+  mediationSuggestion: z
+    .string()
+    .optional()
+    .describe("Brief, private, non-judgmental nudge for de-escalation. Only when sentiment < -0.3."),
+});
+
+export type AiResponse = z.infer<typeof AiResponseSchema>;
 
 // ---------------------------------------------------------------------------
 // Retry with exponential backoff
@@ -58,7 +74,6 @@ async function withRetry<T>(
           (err.status === 429 || err.status === 529));
 
       if (!isRateLimit || attempt === RETRY_DELAYS_MS.length) {
-        // Non-transient error, or exhausted retries — rethrow.
         break;
       }
 
@@ -84,10 +99,9 @@ function sleep(ms: number) {
 // ---------------------------------------------------------------------------
 // Tracks errors over a rolling 1-minute window. When the error rate exceeds
 // 50% across a minimum sample size, opens the circuit and returns a fallback
-// result instead of calling the API (preventing cascading failures).
+// result instead of calling the API.
 
 interface CircuitWindow {
-  /** Unix timestamp (ms) when this bucket expires. */
   expiresAt: number;
   successes: number;
   failures: number;
@@ -97,7 +111,7 @@ class CircuitBreaker {
   private window: CircuitWindow;
   private readonly windowMs = 60_000; // 1 minute
   private readonly errorThreshold = 0.5; // 50%
-  private readonly minSamples = 5; // need at least 5 calls before tripping
+  private readonly minSamples = 5;
 
   constructor() {
     this.window = this.freshWindow();
@@ -113,7 +127,6 @@ class CircuitBreaker {
     }
   }
 
-  /** Returns true when the circuit is open (too many errors — skip API call). */
   isOpen(): boolean {
     this.rotate();
     const total = this.window.successes + this.window.failures;
@@ -131,7 +144,6 @@ class CircuitBreaker {
     this.window.failures++;
   }
 
-  /** Diagnostic snapshot (for /api/health). */
   stats() {
     this.rotate();
     const total = this.window.successes + this.window.failures;
@@ -144,194 +156,158 @@ class CircuitBreaker {
   }
 }
 
-// Module-level singleton — shared across all AI calls in this process.
 export const circuitBreaker = new CircuitBreaker();
 
-// Fallback result returned when the circuit is open.
-const FALLBACK_RESULT: AiAnalysisResult = {
-  tensionScore: 0,
-  escalationLevel: "LOW",
-  sentiment: 0,
-  mediationSuggestion: "Analysis unavailable — AI service temporarily degraded.",
-  signalsFired: ["circuit-breaker-open"],
-  confidence: 0,
-  isFallback: true,
-};
+// ---------------------------------------------------------------------------
+// JSON extraction helper with strict validation
+// ---------------------------------------------------------------------------
+
+function extractAndValidateJson<T>(
+  text: string,
+  schema: z.ZodSchema<T>,
+  label: string
+): T {
+  // Strip markdown fences if present
+  const cleaned = text.replace(/```(?:json)?/g, "").trim();
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (err) {
+    log.error({ label, text: text.slice(0, 200) }, "AI response is not valid JSON");
+    throw new Error(`AI response is not valid JSON: ${err}`);
+  }
+
+  const result = schema.safeParse(parsed);
+  if (!result.success) {
+    log.error(
+      { label, issues: result.error.issues, parsed },
+      "AI response failed schema validation"
+    );
+    throw new Error(`AI response schema validation failed: ${result.error.message}`);
+  }
+
+  return result.data;
+}
 
 // ---------------------------------------------------------------------------
-// Stage 1: NLP analysis (sentiment, emotion, language, embedding proxy)
+// Single structured AI analysis call
 // ---------------------------------------------------------------------------
-// Note: for a real embedding vector, pair this with a dedicated embeddings
-// endpoint (e.g. Voyage AI) rather than asking the chat model to emit one.
-export async function analyzeMessage(
-  text: string
-): Promise<Omit<NlpAnalysis, "embedding">> {
+// Consolidates NLP + explanation + mediation into ONE API call.
+// The LLM outputs: { sentiment, emotion, language, explanation, mediationSuggestion? }
+// The application code computes: tensionScore, riskLevel, signals, trend.
+
+export interface AiAnalysisInput {
+  messageText: string;
+  signalsSummary: string;   // compact derived-signal summary (no raw text beyond current message)
+  contextSummary: string;   // conversation context (display names + signals, no PII)
+  shouldGenerateNudge: boolean; // only generate nudge when tension is already elevated
+}
+
+export async function analyzeMessage(input: AiAnalysisInput): Promise<AiResponse> {
+  const nudgeInstruction = input.shouldGenerateNudge
+    ? `\n- "mediationSuggestion": a brief, private, non-judgmental nudge for the person who sent this message. Keep it supportive and under 80 words.`
+    : `\n- "mediationSuggestion": null (tension is not yet elevated enough to warrant a nudge)`;
+
   return withRetry(async () => {
     const response = await client.messages.create({
       model: MODEL,
-      max_tokens: 300,
+      max_tokens: 400,
       messages: [
         {
           role: "user",
-          // PII constraint: only the message text (no username, no thread context).
-          content: `Analyze this chat message. Respond ONLY with JSON, no preamble, no markdown fences.
-Schema: { "sentiment": number (-1 to 1), "emotion": string (single primary emotion), "language": string (ISO 639-1 code) }
+          content: `Analyze this chat message and conversation context. Respond ONLY with a valid JSON object — no markdown, no preamble.
 
-Message: """${text}"""`,
+Required fields:
+- "sentiment": number from -1 (very negative) to 1 (very positive)
+- "emotion": string — single primary emotion label (e.g. "anger", "frustration", "neutral", "joy", "anxiety")
+- "language": ISO 639-1 code (e.g. "en")
+- "explanation": one sentence describing the emotional tone${nudgeInstruction}
+
+Message: """${input.messageText}"""
+
+Recent context: """${input.contextSummary}"""`,
         },
       ],
     });
 
     const textBlock = response.content.find((b) => b.type === "text");
     if (!textBlock || textBlock.type !== "text") {
-      throw new Error("AI analysis returned no text block");
+      throw new Error("AI response contained no text block");
     }
-    return extractJson(textBlock.text);
+
+    return extractAndValidateJson(textBlock.text, AiResponseSchema, "analyzeMessage");
   }, "analyzeMessage");
 }
 
 // ---------------------------------------------------------------------------
-// Stage 2: Conflict prediction from recent thread signals
+// Fallback result when circuit breaker is open
 // ---------------------------------------------------------------------------
-// signalsSummary is a compact description of recent messages' derived
-// signals (sentiment trend, reply gaps, interruptions) — never raw text
-// beyond what's needed for the current analysis window.
-export async function predictConflict(
-  signalsSummary: string
-): Promise<ConflictPrediction> {
-  return withRetry(async () => {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 400,
-      messages: [
-        {
-          role: "user",
-          content: `Given this summary of recent conversation signals, assess conflict risk.
-Respond ONLY with JSON, no preamble, no markdown fences.
-Schema: { "tensionScore": number (0-1), "trend": number (delta vs previous), "confidence": number (0-1), "signalsFired": string[] (short human-readable reasons, e.g. "3 unanswered questions", "tone shift detected") }
 
-Signals: """${signalsSummary}"""`,
-        },
-      ],
-    });
-
-    const textBlock = response.content.find((b) => b.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      throw new Error("AI prediction returned no text block");
-    }
-    return extractJson(textBlock.text);
-  }, "predictConflict");
+export interface AiAnalysisFallback {
+  isFallback: true;
+  sentiment: 0;
+  emotion: null;
+  explanation: string;
+  mediationSuggestion: null;
 }
 
-// ---------------------------------------------------------------------------
-// Stage 3: Mediation / nudge generation
-// ---------------------------------------------------------------------------
-export async function generateNudge(
-  context: string,
-  prediction: ConflictPrediction
-): Promise<NudgeSuggestion> {
-  const level =
-    prediction.tensionScore > 0.8
-      ? 4
-      : prediction.tensionScore > 0.6
-      ? 3
-      : prediction.tensionScore > 0.4
-      ? 2
-      : 1;
-
-  return withRetry(async () => {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 400,
-      messages: [
-        {
-          role: "user",
-          // PII constraint: context contains only derived signals + display name,
-          // NOT raw message text.
-          content: `Conversation context: """${context}"""
-Detected signals: ${prediction.signalsFired.join(", ")}
-Tension score: ${prediction.tensionScore}
-
-Draft a brief, private, non-judgmental nudge for the person about to send their next message (e.g. a gentle rewrite suggestion or a check-in prompt). Respond ONLY with JSON, no preamble, no markdown fences.
-Schema: { "message": string, "rationale": string (one sentence, why this nudge) }`,
-        },
-      ],
-    });
-
-    const textBlock = response.content.find((b) => b.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      throw new Error("AI nudge generation returned no text block");
-    }
-    const parsed = extractJson<{ message: string; rationale: string }>(
-      textBlock.text
-    );
-    return { level, ...parsed };
-  }, "generateNudge");
-}
+export const AI_FALLBACK: AiAnalysisFallback = {
+  isFallback: true,
+  sentiment: 0,
+  emotion: null,
+  explanation: "Analysis unavailable — AI service temporarily degraded.",
+  mediationSuggestion: null,
+};
 
 // ---------------------------------------------------------------------------
-// Orchestrated pipeline — runs all 3 stages and returns AiAnalysisResult
+// Orchestrated analysis — main entry point for the BullMQ worker
 // ---------------------------------------------------------------------------
-// This is the main entry point for the BullMQ worker.
-//
-// Inputs:
-//   messageText    — the raw message text (for NLP stage only)
-//   signalsSummary — compact derived-signal summary (for prediction stage)
-//   contextSummary — conversation context summary (for nudge stage; no PII beyond displayName)
-//   previousTensionScore — 0..1, used to compute trend
 
-export async function analyzeThread({
-  messageText,
-  signalsSummary,
-  contextSummary,
-  previousTensionScore = 0,
-}: {
+export interface AnalyzeThreadInput {
   messageText: string;
   signalsSummary: string;
   contextSummary: string;
   previousTensionScore?: number;
-}): Promise<AiAnalysisResult> {
+}
+
+export type AnalyzeThreadResult =
+  | (AiResponse & { isFallback: false })
+  | AiAnalysisFallback;
+
+export async function analyzeThread(
+  input: AnalyzeThreadInput
+): Promise<AnalyzeThreadResult> {
   // Check circuit breaker before touching the API.
   if (circuitBreaker.isOpen()) {
     log.warn("Circuit breaker open — returning fallback analysis result");
-    return FALLBACK_RESULT;
+    return AI_FALLBACK;
   }
 
   try {
-    // Stage 1: NLP
-    const nlp = await analyzeMessage(messageText);
+    const previousScore = input.previousTensionScore ?? 0;
+    // Only generate nudge if previous tension was already elevated
+    const shouldGenerateNudge = previousScore >= 0.3;
 
-    // Stage 2: Conflict prediction
-    const prediction = await predictConflict(signalsSummary);
-
-    // Stage 3: Nudge / mediation
-    const nudge = await generateNudge(contextSummary, prediction);
+    const result = await analyzeMessage({
+      messageText: input.messageText,
+      signalsSummary: input.signalsSummary,
+      contextSummary: input.contextSummary,
+      shouldGenerateNudge,
+    });
 
     circuitBreaker.recordSuccess();
 
-    // Map tensionScore 0..1 → 0..100, derive escalationLevel.
-    const tensionScore100 = Math.round(prediction.tensionScore * 100);
-    const escalationLevel = toEscalationLabel(prediction.tensionScore);
-
     log.info(
-      { tensionScore: tensionScore100, escalationLevel, isFallback: false },
+      { sentiment: result.sentiment, emotion: result.emotion, isFallback: false },
       "AI analysis complete"
     );
 
-    return {
-      tensionScore: tensionScore100,
-      escalationLevel,
-      sentiment: nlp.sentiment,
-      mediationSuggestion: nudge.message,
-      signalsFired: prediction.signalsFired,
-      confidence: prediction.confidence,
-      isFallback: false,
-    };
+    return { ...result, isFallback: false };
   } catch (err: unknown) {
     circuitBreaker.recordFailure();
     log.error({ err }, "AI pipeline error — all retries exhausted");
-    // Return fallback rather than propagating so the worker doesn't crash.
-    return { ...FALLBACK_RESULT };
+    return AI_FALLBACK;
   }
 }
 
@@ -339,9 +315,9 @@ export async function analyzeThread({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function toEscalationLabel(tensionScore01: number): EscalationLevelLabel {
-  if (tensionScore01 >= 0.8) return "CRITICAL";
-  if (tensionScore01 >= 0.6) return "HIGH";
-  if (tensionScore01 >= 0.4) return "MEDIUM";
+export function toEscalationLabel(tensionScore01: number): EscalationLevelLabel {
+  if (tensionScore01 >= 0.75) return "CRITICAL";
+  if (tensionScore01 >= 0.5) return "HIGH";
+  if (tensionScore01 >= 0.3) return "MEDIUM";
   return "LOW";
 }

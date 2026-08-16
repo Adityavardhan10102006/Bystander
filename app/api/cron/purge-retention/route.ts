@@ -8,7 +8,8 @@ import { logger } from "@/lib/logger";
 // Trigger: Vercel Cron (configured in vercel.json) on a schedule set by
 // RETENTION_PURGE_INTERVAL_HOURS (default 24 h).
 //
-// Security: protected by CRON_SECRET Bearer token in the Authorization header.
+// Security: REQUIRED — protected by CRON_SECRET Bearer token in the Authorization header.
+// Security FAILS CLOSED: if CRON_SECRET is not configured, all requests are rejected.
 // Vercel Cron automatically sends this header when configured.
 //
 // Returns a JSON summary of what was purged (for observability).
@@ -16,14 +17,22 @@ import { logger } from "@/lib/logger";
 const log = logger.child({ module: "api/cron/purge-retention" });
 
 export async function GET(req: NextRequest) {
-  // ── Auth: require CRON_SECRET ─────────────────────────────────────────────
+  // ── Auth: CRON_SECRET is REQUIRED — fail CLOSED ───────────────────────────
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = req.headers.get("authorization");
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      log.warn("Purge cron called with invalid or missing CRON_SECRET");
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!cronSecret) {
+    // Configuration error: secret is missing. Reject ALL requests.
+    // Never silently allow access when security config is incomplete.
+    log.error("CRON_SECRET is not configured — rejecting purge request");
+    return NextResponse.json(
+      { error: "Service misconfigured — purge endpoint is disabled" },
+      { status: 503 }
+    );
+  }
+
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader || authHeader !== `Bearer ${cronSecret}`) {
+    log.warn("Purge cron called with invalid or missing CRON_SECRET");
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const startedAt = Date.now();
